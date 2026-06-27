@@ -1,6 +1,6 @@
 {
   "name": "sysprobe",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Small TypeScript system probe library and CLI.",
   "type": "module",
   "repository": {
