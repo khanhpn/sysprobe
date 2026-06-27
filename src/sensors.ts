@@ -1,16 +1,19 @@
 import { EventEmitter } from "node:events";
+import { execFile } from "node:child_process";
 import { glob, readFile } from "node:fs/promises";
 import si from "systeminformation";
 
 const CPU_TEMPERATURE_SOURCE = "systeminformation.cpuTemperature";
 const LINUX_HWMON_SOURCE = "linux.hwmon";
+const MACOS_CPU_TEMP_SOURCE = "macos.osx-cpu-temp";
+const MACOS_SMC_SOURCE = "macos.smc";
 
 export interface CpuTemperatureSensor {
   supported: boolean;
   main: number | null;
   max: number | null;
   cores: Array<number | null>;
-  source: typeof CPU_TEMPERATURE_SOURCE;
+  source: typeof CPU_TEMPERATURE_SOURCE | typeof LINUX_HWMON_SOURCE | typeof MACOS_CPU_TEMP_SOURCE;
 }
 
 export interface FanSensor {
@@ -18,7 +21,7 @@ export interface FanSensor {
   rpm: number | null;
   label: string | null;
   path: string;
-  source: typeof LINUX_HWMON_SOURCE;
+  source: typeof LINUX_HWMON_SOURCE | typeof MACOS_SMC_SOURCE;
 }
 
 export interface SensorsSnapshot {
@@ -44,8 +47,8 @@ export interface SensorsWatcher extends EventEmitter {
 
 export const getSensors = async (): Promise<SensorsSnapshot> => {
   const warnings: string[] = [];
-  const cpuTemperature = normalizeCpuTemperature(await si.cpuTemperature());
-  const fans = await readLinuxFans();
+  const cpuTemperature = await readCpuTemperature();
+  const fans = await readFans();
 
   if (!cpuTemperature.supported) {
     warnings.push("CPU temperature is unsupported");
@@ -60,6 +63,21 @@ export const getSensors = async (): Promise<SensorsSnapshot> => {
     fans,
     warnings
   };
+};
+
+const readCpuTemperature = async (): Promise<CpuTemperatureSensor> => {
+  const systeminformationTemperature = normalizeCpuTemperature(await si.cpuTemperature());
+
+  if (systeminformationTemperature.supported) {
+    return systeminformationTemperature;
+  }
+
+  return (await readLinuxHwmonTemperature()) ?? (await readMacosCpuTemperature()) ?? systeminformationTemperature;
+};
+
+const readFans = async (): Promise<FanSensor[]> => {
+  const linuxFans = await readLinuxFans();
+  return linuxFans.length > 0 ? linuxFans : await readMacosSmcFans();
 };
 
 export const watchSensors = (options: WatchSensorsOptions = {}): SensorsWatcher => {
@@ -137,6 +155,47 @@ const readLinuxFans = async (): Promise<FanSensor[]> => {
   return fans.filter((fan): fan is FanSensor => fan !== null);
 };
 
+const readLinuxHwmonTemperature = async (): Promise<CpuTemperatureSensor | null> => {
+  const tempPaths: string[] = [];
+
+  try {
+    for await (const path of glob("/sys/class/hwmon/*/temp*_input")) {
+      tempPaths.push(path);
+    }
+  } catch {
+    return null;
+  }
+
+  const readings = (await Promise.all(tempPaths.map(readLinuxHwmonTemperatureValue))).filter(
+    (reading): reading is number => reading !== null
+  );
+
+  if (readings.length === 0) {
+    return null;
+  }
+
+  const main = readings[0] ?? null;
+  const max = readings.reduce((highest, reading) => Math.max(highest, reading), readings[0]);
+
+  return {
+    supported: true,
+    main,
+    max,
+    cores: [],
+    source: LINUX_HWMON_SOURCE
+  };
+};
+
+const readLinuxHwmonTemperatureValue = async (path: string): Promise<number | null> => {
+  const rawValue = normalizeSensorNumber(await readOptionalFile(path));
+
+  if (rawValue === null) {
+    return null;
+  }
+
+  return rawValue > 1_000 ? rawValue / 1_000 : rawValue;
+};
+
 const readLinuxFan = async (path: string): Promise<FanSensor | null> => {
   const rpm = normalizeSensorNumber(await readOptionalFile(path));
 
@@ -157,6 +216,55 @@ const readFanLabel = async (path: string): Promise<string | null> => {
   const labelPath = path.replace(/_input$/, "_label");
   const label = await readOptionalFile(labelPath);
   return label === null || label === "" ? null : label;
+};
+
+const readMacosCpuTemperature = async (): Promise<CpuTemperatureSensor | null> => {
+  const output = await execFileOptional("osx-cpu-temp", []);
+  const temperature = normalizeSensorNumber(output?.match(/-?\d+(?:\.\d+)?/)?.[0]);
+
+  if (temperature === null) {
+    return null;
+  }
+
+  return {
+    supported: true,
+    main: temperature,
+    max: temperature,
+    cores: [],
+    source: MACOS_CPU_TEMP_SOURCE
+  };
+};
+
+const readMacosSmcFans = async (): Promise<FanSensor[]> => {
+  const fans = await Promise.all(
+    Array.from({ length: 8 }, async (_, index): Promise<FanSensor | null> => {
+      const key = `F${index}Ac`;
+      const output = await execFileOptional("smc", ["-k", key, "-r"]);
+      const rpm = normalizeSensorNumber(output?.match(/-?\d+(?:\.\d+)?(?=\s*$)/m)?.[0]);
+
+      if (rpm === null) {
+        return null;
+      }
+
+      return {
+        supported: true,
+        rpm,
+        label: `Fan ${index + 1}`,
+        path: `smc:${key}`,
+        source: MACOS_SMC_SOURCE
+      };
+    })
+  );
+
+  return fans.filter((fan): fan is FanSensor => fan !== null);
+};
+
+const execFileOptional = async (command: string, args: string[]): Promise<string | null> => {
+  return await new Promise((resolve) => {
+    execFile(command, args, (error, stdout) => {
+      resolve(error ? null : stdout.trim());
+    });
+  });
 };
 
 const readOptionalFile = async (path: string): Promise<string | null> => {

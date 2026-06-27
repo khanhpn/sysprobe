@@ -28,6 +28,10 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "dev:hardware:details": "node --import tsx src/cli.ts hardware --details",
+    "dev:hardware": "node --import tsx src/cli.ts hardware",
+    "dev:sensors": "node --import tsx src/cli.ts sensors",
+    "dev:watch": "node --import tsx src/cli.ts watch --sensors",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -44,6 +48,7 @@
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.8.5",
+    "tsx": "^4.22.4",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.62.0",
     "vitest": "^3.2.4"

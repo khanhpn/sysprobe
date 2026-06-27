@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const cpuTemperature = vi.fn();
 const glob = vi.fn();
 const readFile = vi.fn();
+const execFile = vi.fn();
 
 vi.mock("systeminformation", () => ({
   default: {
@@ -15,11 +16,16 @@ vi.mock("node:fs/promises", () => ({
   readFile
 }));
 
+vi.mock("node:child_process", () => ({
+  execFile
+}));
+
 describe("getSensors", () => {
   beforeEach(() => {
     cpuTemperature.mockReset();
     glob.mockReset();
     readFile.mockReset();
+    execFile.mockReset();
   });
 
   test("normalizes unsupported CPU temperature sentinel values", async () => {
@@ -28,6 +34,9 @@ describe("getSensors", () => {
     for (const value of [-1, null, undefined]) {
       cpuTemperature.mockResolvedValueOnce({ main: value, cores: [] });
       glob.mockReturnValueOnce([]);
+      execFile.mockImplementation((_command, _args, callback) => {
+        callback(Object.assign(new Error("missing"), { code: "ENOENT" }));
+      });
 
       const sensors = await getSensors();
 
@@ -44,7 +53,10 @@ describe("getSensors", () => {
     const { getSensors } = await import("../src/index.js");
 
     cpuTemperature.mockResolvedValueOnce({ main: 47, cores: [] });
-    glob.mockReturnValueOnce([]);
+    glob.mockReturnValue([]);
+    execFile.mockImplementation((_command, _args, callback) => {
+      callback(Object.assign(new Error("missing"), { code: "ENOENT" }));
+    });
 
     const sensors = await getSensors();
 
@@ -61,7 +73,13 @@ describe("getSensors", () => {
     const { getSensors } = await import("../src/index.js");
 
     cpuTemperature.mockResolvedValueOnce({ main: 51, cores: [50, -1, null, 49] });
-    glob.mockReturnValueOnce(["/sys/class/hwmon/hwmon0/fan1_input"]);
+    glob.mockImplementation((pattern: string) => {
+      if (pattern.includes("fan")) return ["/sys/class/hwmon/hwmon0/fan1_input"];
+      return [];
+    });
+    execFile.mockImplementation((_command, _args, callback) => {
+      callback(Object.assign(new Error("missing"), { code: "ENOENT" }));
+    });
     readFile.mockImplementation(async (path: string) => {
       if (path.endsWith("fan1_input")) return "1240\n";
       if (path.endsWith("fan1_label")) return "CPU Fan\n";
@@ -86,12 +104,84 @@ describe("getSensors", () => {
     const { getSensors } = await import("../src/index.js");
 
     cpuTemperature.mockResolvedValueOnce({ main: 51, cores: [50] });
-    glob.mockReturnValueOnce(["/sys/class/hwmon/hwmon0/fan1_input"]);
+    glob.mockImplementation((pattern: string) => {
+      if (pattern.includes("fan")) return ["/sys/class/hwmon/hwmon0/fan1_input"];
+      return [];
+    });
+    execFile.mockImplementation((_command, _args, callback) => {
+      callback(Object.assign(new Error("missing"), { code: "ENOENT" }));
+    });
     readFile.mockRejectedValue(Object.assign(new Error("missing"), { code: "ENOENT" }));
 
     const sensors = await getSensors();
 
     expect(sensors.fans).toEqual([]);
     expect(sensors.warnings).toContain("Fan sensors are unsupported");
+  });
+
+  test("falls back to Linux hwmon temperature when systeminformation is unsupported", async () => {
+    const { getSensors } = await import("../src/index.js");
+
+    cpuTemperature.mockResolvedValueOnce({ main: -1, max: -1, cores: [] });
+    glob.mockImplementation((pattern: string) => {
+      if (pattern.includes("temp")) return ["/sys/class/hwmon/hwmon1/temp1_input"];
+      return [];
+    });
+    readFile.mockImplementation(async (path: string) => {
+      if (path.endsWith("temp1_input")) return "62000\n";
+      if (path.endsWith("temp1_label")) return "CPU Package\n";
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    });
+    execFile.mockImplementation((_command, _args, callback) => {
+      callback(Object.assign(new Error("missing"), { code: "ENOENT" }));
+    });
+
+    const sensors = await getSensors();
+
+    expect(sensors.cpuTemperature).toEqual({
+      supported: true,
+      main: 62,
+      max: 62,
+      cores: [],
+      source: "linux.hwmon"
+    });
+  });
+
+  test("falls back to macOS helper commands when they are installed", async () => {
+    const { getSensors } = await import("../src/index.js");
+
+    cpuTemperature.mockResolvedValueOnce({ main: -1, max: -1, cores: [] });
+    glob.mockReturnValue([]);
+    execFile.mockImplementation((command, args, callback) => {
+      if (command === "osx-cpu-temp") {
+        callback(null, "62.4°C\n", "");
+        return;
+      }
+
+      if (command === "smc" && args.includes("F0Ac")) {
+        callback(null, "  F0Ac  [fpe2]  1280.00\n", "");
+        return;
+      }
+
+      callback(Object.assign(new Error("missing"), { code: "ENOENT" }));
+    });
+
+    const sensors = await getSensors();
+
+    expect(sensors.cpuTemperature).toMatchObject({
+      supported: true,
+      main: 62.4,
+      max: 62.4,
+      source: "macos.osx-cpu-temp"
+    });
+    expect(sensors.fans).toEqual([
+      {
+        supported: true,
+        rpm: 1280,
+        label: "Fan 1",
+        path: "smc:F0Ac",
+        source: "macos.smc"
+      }
+    ]);
   });
 });
