@@ -5,12 +5,12 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/khanhpham/sysprobe.git"
+    "url": "git+https://github.com/khanhpn/sysprobe.git"
   },
   "bugs": {
-    "url": "https://github.com/khanhpham/sysprobe/issues"
+    "url": "https://github.com/khanhpn/sysprobe/issues"
   },
-  "homepage": "https://github.com/khanhpham/sysprobe#readme",
+  "homepage": "https://github.com/khanhpn/sysprobe#readme",
   "license": "MIT",
   "bin": {
     "sysprobe": "./dist/cli.js"
