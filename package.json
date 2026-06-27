@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Small TypeScript system probe library and CLI.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/khanhpham/sysprobe.git"
+  },
+  "bugs": {
+    "url": "https://github.com/khanhpham/sysprobe/issues"
+  },
+  "homepage": "https://github.com/khanhpham/sysprobe#readme",
+  "license": "MIT",
   "bin": {
     "sysprobe": "./dist/cli.js"
   },
