@@ -6,17 +6,17 @@ The package does not require `sudo`, does not control fan speed, and never fakes
 
 ## Features
 
-* Read CPU temperature when supported by the system
-* Read Linux fan RPM sensors from `/sys/class/hwmon/*/fan*_input`
-* Watch CPU, RAM, temperature, and fan readings in realtime
-* CLI support for quick diagnostics
-* TypeScript-first API
-* Safe fallback behavior for unsupported hardware sensors
+- Read CPU temperature when supported by the system
+- Read Linux fan RPM sensors from `/sys/class/hwmon/*/fan*_input`
+- Watch CPU, RAM, temperature, and fan readings in realtime
+- CLI support for quick diagnostics
+- TypeScript-first API
+- Safe fallback behavior for unsupported hardware sensors
 
 ## Requirements
 
-* Node.js 24 or newer
-* pnpm for local development
+- Node.js 24 or newer
+- pnpm for local development
 
 Linux fan RPM readings use `/sys/class/hwmon/*/fan*_input`.
 
