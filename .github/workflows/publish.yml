@@ -49,5 +49,20 @@ jobs:
       - name: Check package contents
         run: npm pack --dry-run
 
+      - name: Verify release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${RELEASE_TAG#v}"
+
+          echo "Release tag: $RELEASE_TAG"
+          echo "Package version: $PACKAGE_VERSION"
+
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: release tag is $RELEASE_TAG but package.json is $PACKAGE_VERSION"
+            exit 1
+          fi
+
       - name: Publish to npm
         run: npm publish
